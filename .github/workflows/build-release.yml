@@ -1,88 +1,91 @@
-name: Build and Release
+name: Build & Release LocalSheet
 
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:
-
-permissions:
-  contents: write
+      - 'v*'      # Trigger by pushing a tag like v1.0.0
+  workflow_dispatch:  # Or trigger manually from GitHub Actions tab
 
 jobs:
   build-windows:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
-      - name: Checkout code
+      - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install PyQt6 openpyxl pyinstaller
+          pip install -r requirements.txt
+          pip install pyinstaller
 
-      - name: Build executable with PyInstaller
+      - name: Build executable
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name LocalSheet ^
-            --add-data "src;src" ^
-            src/app.py
+          python build.py --clean
 
       - name: Verify build
         run: |
-          if not exist dist\LocalSheet.exe exit 1
-          dir dist\LocalSheet.exe
+          if (Test-Path "dist/LocalSheet.exe") {
+            Write-Host "✓ Build successful"
+          } else {
+            Write-Host "✗ Build failed"
+            exit 1
+          }
+        shell: pwsh
 
       - name: Create installer zip
         run: |
-          copy install_windows.bat dist\
-          copy uninstall_windows.bat dist\
-          copy Install.bat dist\
-          copy Uninstall.bat dist\
-          cd dist
-          7z a LocalSheet-Windows.zip LocalSheet.exe install_windows.bat uninstall_windows.bat Install.bat Uninstall.bat
+          mkdir release
+          Copy-Item "dist/LocalSheet.exe" "release/"
+          Copy-Item "Install.bat" "release/" -ErrorAction SilentlyContinue
+          Copy-Item "Uninstall.bat" "release/" -ErrorAction SilentlyContinue
+          Compress-Archive -Path "release/*" -DestinationPath "release/LocalSheet-Windows.zip"
+        shell: pwsh
 
       - name: Determine version
         id: version
         shell: bash
         run: |
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/}"
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           else
-            VERSION="v0.0.0-$(date +%Y%m%d)-$(echo $GITHUB_SHA | cut -c1-7)"
+            echo "tag=v1.0.0-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: LocalSheet ${{ steps.version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: LocalSheet ${{ steps.version.outputs.tag }}
           body: |
-            ## LocalSheet ${{ steps.version.outputs.version }}
+            ## LocalSheet ${{ steps.version.outputs.tag }}
 
             ### Download
-
-            - **LocalSheet-Windows.zip** - includes the executable plus install/uninstall scripts
-            - **LocalSheet.exe** - standalone executable
+            - **LocalSheet.exe** — Standalone executable, no installation needed
+            - **LocalSheet-Windows.zip** — Includes exe + installer scripts
 
             ### Install
+            1. Download `LocalSheet.exe`
+            2. Double-click to run — that's it!
 
-            1. Download and extract the zip
-            2. Run Install.bat (or install_windows.bat)
-            3. Find LocalSheet on your Desktop and Start Menu
+            Or use the installer:
+            1. Download `LocalSheet-Windows.zip`
+            2. Extract and double-click `Install.bat`
+            3. Shortcuts appear on Desktop and Start Menu
 
-            ### Uninstall
-
-            Run Uninstall.bat to remove all shortcuts and files.
+            ### Features
+            - Fully offline spreadsheet
+            - 40+ formulas, charts, conditional formatting
+            - No account, no cloud, no tracking
           files: |
             dist/LocalSheet.exe
-            dist/LocalSheet-Windows.zip
-          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            release/LocalSheet-Windows.zip
+          draft: false
+          prerelease: false
